@@ -1,0 +1,10 @@
+version: '3.7'
+services:
+  gogrepoc:
+    image: magnitus/gogrepoc:latest
+    entrypoint:
+      - /bin/bash
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./games:/opt/games
