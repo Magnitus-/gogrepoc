@@ -14,12 +14,10 @@ import os
 import sys
 import threading
 import logging
-import html5lib
 import pprint
 import time
 import zipfile
 import hashlib
-import getpass
 import argparse
 import codecs
 import io
@@ -66,6 +64,7 @@ except ImportError:
     def html2text(x): return x
 
 from wakelock import Wakelock
+from commands.login import Login
     
 GENERIC_READ = 0x80000000
 GENERIC_WRITE = 0x40000000
@@ -1004,102 +1003,6 @@ def process_argv(argv):
 # --------
 # Commands
 # --------
-def cmd_login(user, passwd):
-    """Attempts to log into GOG and saves the resulting cookiejar to disk.
-    """
-    login_data = {'user': user,
-                  'passwd': passwd,
-                  'auth_url': None,
-                  'login_token': None,
-                  'two_step_url': None,
-                  'two_step_token': None,
-                  'two_step_security_code': None,
-                  'login_success': False,
-                  }
-
-    global_cookies.clear()  # reset cookiejar
-
-    # prompt for login/password if needed
-    if login_data['user'] is None:
-        login_data['user'] = input("Username: ")
-    if login_data['passwd'] is None:
-        login_data['passwd'] = getpass.getpass()
-
-    info("attempting gog login as '{}' ...".format(login_data['user']))
-    
-    loginSession = makeGOGSession(True)
-
-    # fetch the auth url
-    
-    page_response = request(loginSession,GOG_HOME_URL)    
-    etree = html5lib.parse(page_response.text, namespaceHTMLElements=False)
-    for elm in etree.findall('.//script'):
-        if elm.text is not None and 'GalaxyAccounts' in elm.text:
-            authCandidates = elm.text.split("'")
-            for authCandidate in authCandidates:
-                if 'auth' in authCandidate:
-                    testAuth = urlparse(authCandidate)
-                    if testAuth.scheme == "https":
-                        login_data['auth_url'] = authCandidate
-                        break
-            if login_data['auth_url']:
-                break
-                
-    if not login_data['auth_url']:
-        error("cannot find auth url, please report to the maintainer")
-        exit()
-
-    page_response = request(loginSession,login_data['auth_url'])          
-    # fetch the login token
-    etree = html5lib.parse(page_response.text, namespaceHTMLElements=False)
-    # Bail if we find a request for a reCAPTCHA
-    if len(etree.findall('.//div[@class="g-recaptcha form__recaptcha"]')) > 0:
-        error("cannot continue, gog is asking for a reCAPTCHA :(  try again in a few minutes.")
-        return
-    for elm in etree.findall('.//input'):
-        if elm.attrib['id'] == 'login__token':
-            login_data['login_token'] = elm.attrib['value']
-            break
-
-    # perform login and capture two-step token if required
-    page_response = request(loginSession,GOG_LOGIN_URL, data={'login[username]': login_data['user'],
-                                               'login[password]': login_data['passwd'],
-                                               'login[login]': '',
-                                               'login[_token]': login_data['login_token']}) 
-    etree = html5lib.parse(page_response.text, namespaceHTMLElements=False)
-    if 'two_step' in page_response.url:
-        login_data['two_step_url'] = page_response.url
-        for elm in etree.findall('.//input'):
-            if elm.attrib['id'] == 'second_step_authentication__token':
-                login_data['two_step_token'] = elm.attrib['value']
-                break
-    elif 'on_login_success' in page_response.url:
-        login_data['login_success'] = True
-
-    # perform two-step if needed
-    if login_data['two_step_url'] is not None:
-        login_data['two_step_security_code'] = input("enter two-step security code: ")
-
-        # Send the security code back to GOG
-        page_response= request(loginSession,login_data['two_step_url'], 
-                     data={'second_step_authentication[token][letter_1]': login_data['two_step_security_code'][0],
-                           'second_step_authentication[token][letter_2]': login_data['two_step_security_code'][1],
-                           'second_step_authentication[token][letter_3]': login_data['two_step_security_code'][2],
-                           'second_step_authentication[token][letter_4]': login_data['two_step_security_code'][3],
-                           'second_step_authentication[send]': "",
-                           'second_step_authentication[_token]': login_data['two_step_token']})
-        if 'on_login_success' in page_response.url:
-            login_data['login_success'] = True
-
-    # save cookies on success
-    if login_data['login_success']:
-        info('login successful!')
-        for c in loginSession.cookies:
-            global_cookies.set_cookie(c)
-        global_cookies.save()
-    else:
-        error('login failed, verify your username/password and try again.')
-
 def makeGitHubSession(authenticatedSession=False):
     gitSession = requests.Session()
     gitSession.headers={'User-Agent':USER_AGENT,'Accept':'application/vnd.github.v3+json'}
@@ -2484,7 +2387,7 @@ def main(args):
     stime = datetime.datetime.now()
 
     if args.command == 'login':
-        cmd_login(args.username, args.password)
+        Login(global_cookies, rootLogger, USER_AGENT)(args.username, args.password)
         return  # no need to see time stats
     elif args.command == 'update':
         if not args.os:    
