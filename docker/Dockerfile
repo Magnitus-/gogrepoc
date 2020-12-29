@@ -6,6 +6,6 @@ WORKDIR /opt
 
 RUN pip install -r requirements.txt
 
-COPY gogrepoc.py /opt/
+COPY *.py /opt/
 
 ENTRYPOINT ["python", "gogrepoc.py"]
